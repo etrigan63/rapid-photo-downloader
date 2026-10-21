@@ -8,6 +8,7 @@ struct RPDConfig: Codable, Equatable {
     var backupRoot: String = ""
     var backupEnabled: Bool = false
     var folderPattern: String = "%Y/%Y-%m-%d"
+    var renameTemplate: String = "{original}"
     var includeVideos: Bool = true
     var counterDigits: Int = 4
     var thumbnailSize: Int = 200

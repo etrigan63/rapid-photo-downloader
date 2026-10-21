@@ -300,6 +300,7 @@ final class MainController: NSViewController {
         progress.doubleValue = 0
         progressLabel.stringValue = ""
         let config = RPDConfig.load()
+        var sessionCounter = 1
 
         let workItems = items
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -312,20 +313,27 @@ final class MainController: NSViewController {
                 let targetDir = relative.split(separator: "/").reduce(dest) { $0.appendingPathComponent(String($1)) }
                 do {
                     try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
-                    let target = targetDir.appendingPathComponent(item.url.lastPathComponent)
+                    let (make, model) = RenameEngine.cameraInfo(url: item.url)
+                    let ctx = RenameContext(url: item.url, date: item.captureDate,
+                                           cameraMake: make, cameraModel: model,
+                                           counter: sessionCounter, counterDigits: config.counterDigits)
+                    let proposed = RenameEngine.apply(template: config.renameTemplate, context: ctx)
+                    let finalName = RenameEngine.uniqueFilename(in: targetDir, proposed: proposed)
+                    sessionCounter += 1
+                    let target = targetDir.appendingPathComponent(finalName)
                     if fm.fileExists(atPath: target.path) {
                         updated[i].status = .skipped
-                        self?.log("Skip (exists): \(item.url.lastPathComponent)")
+                        self?.log("Skip (exists): \(finalName)")
                     } else {
                         try fm.copyItem(at: item.url, to: target)
                         updated[i].status = .copied
-                        self?.log("Copied: \(item.url.lastPathComponent) → \(relative)/")
+                        self?.log("Copied: \(item.url.lastPathComponent) → \(relative)/\(finalName)")
                     }
                     // Backup copy
                     if let backupRoot = config.resolvedBackup {
                         let backupDir = relative.split(separator: "/").reduce(backupRoot) { $0.appendingPathComponent(String($1)) }
                         try? fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
-                        let backupTarget = backupDir.appendingPathComponent(item.url.lastPathComponent)
+                        let backupTarget = backupDir.appendingPathComponent(finalName)
                         if !fm.fileExists(atPath: backupTarget.path) {
                             try? fm.copyItem(at: item.url, to: backupTarget)
                         }
@@ -438,6 +446,7 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
     let backupField = NSTextField()
     let backupCheck = NSButton(checkboxWithTitle: "Enable backup copy", target: nil, action: nil)
     let patternField = NSTextField()
+    let renameField = NSTextField()
     let videosCheck = NSButton(checkboxWithTitle: "Include videos", target: nil, action: nil)
     let counterField = NSTextField()
     let thumbField = NSTextField()
@@ -498,11 +507,12 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
         stack.addArrangedSubview(row("Backup root:", backupField))
         stack.addArrangedSubview(backupCheck)
         stack.addArrangedSubview(row("Folder pattern:", patternField))
+        stack.addArrangedSubview(row("Rename template:", renameField))
         stack.addArrangedSubview(videosCheck)
         stack.addArrangedSubview(row("Counter digits:", counterField))
         stack.addArrangedSubview(row("Thumbnail size:", thumbField))
 
-        let hint = NSTextField(labelWithString: "Folder pattern uses %Y (year), %m (month), %d (day), e.g. %Y/%Y-%m-%d")
+        let hint = NSTextField(labelWithString: "Folder pattern: %Y %m %d. Rename tokens: {original} {ext} {date} {datetime} {camera} {make} {counter} {counter:N}")
         hint.font = NSFont.systemFont(ofSize: 10)
         hint.textColor = .secondaryLabelColor
         stack.addArrangedSubview(hint)
@@ -529,6 +539,8 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
         backupField.placeholderString = "~/Pictures/Rapid Backup"
         backupCheck.state = c.backupEnabled ? .on : .off
         patternField.stringValue = c.folderPattern
+        renameField.stringValue = c.renameTemplate
+        renameField.placeholderString = "{original}"
         videosCheck.state = c.includeVideos ? .on : .off
         counterField.stringValue = String(c.counterDigits)
         thumbField.stringValue = String(c.thumbnailSize)
@@ -540,6 +552,7 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
         c.backupRoot = backupField.stringValue
         c.backupEnabled = (backupCheck.state == .on)
         c.folderPattern = patternField.stringValue.isEmpty ? "%Y/%Y-%m-%d" : patternField.stringValue
+        c.renameTemplate = renameField.stringValue.isEmpty ? "{original}" : renameField.stringValue
         c.includeVideos = (videosCheck.state == .on)
         c.counterDigits = Int(counterField.stringValue) ?? 4
         c.thumbnailSize = Int(thumbField.stringValue) ?? 200

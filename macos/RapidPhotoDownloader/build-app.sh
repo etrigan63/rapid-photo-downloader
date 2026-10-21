@@ -18,6 +18,7 @@ echo "Compiling $BIN..."
 swiftc -O -emit-executable \
     -o "$APP/Contents/MacOS/$BIN" \
     "$SRC_DIR/Config.swift" \
+    "$SRC_DIR/RenameEngine.swift" \
     "$SRC_DIR/HEIFThumbnail.swift" \
     "$SRC_DIR/RapidPhotoDownloader.swift"
 
