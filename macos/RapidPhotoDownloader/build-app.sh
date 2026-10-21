@@ -17,6 +17,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 echo "Compiling $BIN..."
 swiftc -O -emit-executable \
     -o "$APP/Contents/MacOS/$BIN" \
+    "$SRC_DIR/Config.swift" \
     "$SRC_DIR/HEIFThumbnail.swift" \
     "$SRC_DIR/RapidPhotoDownloader.swift"
 

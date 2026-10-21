@@ -27,6 +27,7 @@ struct MediaItem {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var controller: MainController!
+    var preferencesWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMainMenu()
@@ -38,6 +39,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.contentViewController = controller
         window.makeKeyAndOrderFront(nil)
+    }
+
+    @objc func openPreferences(_ sender: Any?) {
+        if preferencesWindow == nil {
+            let pc = PreferencesController()
+            preferencesWindow = pc.window
+            pc.showWindow(nil)
+        } else {
+            preferencesWindow?.makeKeyAndOrderFront(nil)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -55,7 +66,8 @@ func buildMainMenu() -> NSMenu {
     appMenuItem.submenu = appMenu
     appMenu.addItem(withTitle: "About Rapid Photo Downloader", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
     appMenu.addItem(NSMenuItem.separator())
-    let prefs = NSMenuItem(title: "Preferences…", action: nil, keyEquivalent: ",")
+    let prefs = NSMenuItem(title: "Preferences…", action: #selector(AppDelegate.openPreferences(_:)), keyEquivalent: ",")
+    prefs.target = NSApp.delegate
     appMenu.addItem(prefs)
     appMenu.addItem(NSMenuItem.separator())
     appMenu.addItem(withTitle: "Hide Rapid Photo Downloader", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
@@ -121,6 +133,7 @@ final class MainController: NSViewController {
     var destURL: URL?
     var items: [MediaItem] = []
     var isRunning = false
+    var config = RPDConfig.load()
 
     // UI
     let sourceLabel = NSTextField(labelWithString: "No source selected")
@@ -233,6 +246,15 @@ final class MainController: NSViewController {
         self.view = root
     }
 
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        if destURL == nil, let d = config.resolvedDestination {
+            destURL = d
+            destLabel.stringValue = d.path
+        }
+        if let s = sourceURL { sourceLabel.stringValue = s.path }
+    }
+
     // MARK: - Actions
 
     @objc func chooseSource() {
@@ -274,6 +296,7 @@ final class MainController: NSViewController {
         importButton.isEnabled = false
         progress.doubleValue = 0
         progressLabel.stringValue = ""
+        let config = RPDConfig.load()
 
         let workItems = items
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -282,12 +305,8 @@ final class MainController: NSViewController {
             let total = Double(workItems.count)
             for i in updated.indices {
                 let item = updated[i]
-                let df = DateFormatter()
-                df.dateFormat = "yyyy"
-                let year = df.string(from: item.captureDate)
-                df.dateFormat = "yyyy-MM-dd"
-                let day = df.string(from: item.captureDate)
-                let targetDir = dest.appendingPathComponent(year).appendingPathComponent(day)
+                let relative = config.formattedFolder(for: item.captureDate)
+                let targetDir = relative.split(separator: "/").reduce(dest) { $0.appendingPathComponent(String($1)) }
                 do {
                     try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
                     let target = targetDir.appendingPathComponent(item.url.lastPathComponent)
@@ -297,7 +316,16 @@ final class MainController: NSViewController {
                     } else {
                         try fm.copyItem(at: item.url, to: target)
                         updated[i].status = .copied
-                        self?.log("Copied: \(item.url.lastPathComponent) → \(year)/\(day)/")
+                        self?.log("Copied: \(item.url.lastPathComponent) → \(relative)/")
+                    }
+                    // Backup copy
+                    if let backupRoot = config.resolvedBackup {
+                        let backupDir = relative.split(separator: "/").reduce(backupRoot) { $0.appendingPathComponent(String($1)) }
+                        try? fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
+                        let backupTarget = backupDir.appendingPathComponent(item.url.lastPathComponent)
+                        if !fm.fileExists(atPath: backupTarget.path) {
+                            try? fm.copyItem(at: item.url, to: backupTarget)
+                        }
                     }
                 } catch {
                     updated[i].status = .failed
@@ -399,6 +427,158 @@ final class ThumbItem: NSCollectionViewItem {
 }
 
 // MARK: - Main
+
+// MARK: - Preferences window
+
+final class PreferencesController: NSWindowController, NSWindowDelegate {
+    let destField = NSTextField()
+    let backupField = NSTextField()
+    let backupCheck = NSButton(checkboxWithTitle: "Enable backup copy", target: nil, action: nil)
+    let patternField = NSTextField()
+    let videosCheck = NSButton(checkboxWithTitle: "Include videos", target: nil, action: nil)
+    let counterField = NSTextField()
+    let thumbField = NSTextField()
+
+    init() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360),
+                              styleMask: [.titled, .closable],
+                              backing: .buffered, defer: false)
+        window.title = "Preferences"
+        super.init(window: window)
+        window.delegate = self
+        window.contentViewController = buildContent()
+        loadFields()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func buildContent() -> NSViewController {
+        let vc = NSViewController()
+        let root = NSView()
+        vc.view = root
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
+        ])
+
+        func row(_ label: String, _ field: NSTextField) -> NSStackView {
+            let l = NSTextField(labelWithString: label)
+            l.alignment = .right
+            l.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+            let r = NSStackView(views: [l, field])
+            r.orientation = .horizontal
+            r.spacing = 8
+            field.translatesAutoresizingMaskIntoConstraints = false
+            field.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
+            return r
+        }
+
+        stack.addArrangedSubview(row("Destination root:", destField))
+        stack.addArrangedSubview(row("Backup root:", backupField))
+        stack.addArrangedSubview(backupCheck)
+        stack.addArrangedSubview(row("Folder pattern:", patternField))
+        stack.addArrangedSubview(videosCheck)
+        stack.addArrangedSubview(row("Counter digits:", counterField))
+        stack.addArrangedSubview(row("Thumbnail size:", thumbField))
+
+        let hint = NSTextField(labelWithString: "Folder pattern uses %Y (year), %m (month), %d (day), e.g. %Y/%Y-%m-%d")
+        hint.font = NSFont.systemFont(ofSize: 10)
+        hint.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(hint)
+
+        let btnRow = NSStackView()
+        btnRow.orientation = .horizontal
+        btnRow.spacing = 8
+        let saveBtn = NSButton(title: "Save", target: self, action: #selector(save))
+        let exportBtn = NSButton(title: "Export Config…", target: self, action: #selector(exportConfig))
+        let importBtn = NSButton(title: "Import Config…", target: self, action: #selector(importConfig))
+        btnRow.addArrangedSubview(saveBtn)
+        btnRow.addArrangedSubview(exportBtn)
+        btnRow.addArrangedSubview(importBtn)
+        stack.addArrangedSubview(btnRow)
+
+        return vc
+    }
+
+    func loadFields() {
+        let c = RPDConfig.load()
+        destField.stringValue = c.destinationRoot
+        backupField.stringValue = c.backupRoot
+        backupCheck.state = c.backupEnabled ? .on : .off
+        patternField.stringValue = c.folderPattern
+        videosCheck.state = c.includeVideos ? .on : .off
+        counterField.stringValue = String(c.counterDigits)
+        thumbField.stringValue = String(c.thumbnailSize)
+    }
+
+    func collectConfig() -> RPDConfig {
+        var c = RPDConfig()
+        c.destinationRoot = destField.stringValue
+        c.backupRoot = backupField.stringValue
+        c.backupEnabled = (backupCheck.state == .on)
+        c.folderPattern = patternField.stringValue.isEmpty ? "%Y/%Y-%m-%d" : patternField.stringValue
+        c.includeVideos = (videosCheck.state == .on)
+        c.counterDigits = Int(counterField.stringValue) ?? 4
+        c.thumbnailSize = Int(thumbField.stringValue) ?? 200
+        return c
+    }
+
+    @objc func save() {
+        collectConfig().save()
+        if let mc = (NSApp.delegate as? AppDelegate)?.controller {
+            let c = RPDConfig.load()
+            if mc.destURL == nil, let d = c.resolvedDestination {
+                mc.destURL = d
+                mc.destLabel.stringValue = d.path
+            }
+            mc.config = c
+        }
+    }
+
+    @objc func exportConfig() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "rapid-photo-downloader-config.json"
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try collectConfig().export(to: url)
+            } catch {
+                let a = NSAlert()
+                a.messageText = "Export failed"
+                a.informativeText = error.localizedDescription
+                a.runModal()
+            }
+        }
+    }
+
+    @objc func importConfig() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                let c = try RPDConfig.load(from: url)
+                c.save()
+                loadFields()
+            } catch {
+                let a = NSAlert()
+                a.messageText = "Import failed"
+                a.informativeText = error.localizedDescription
+                a.runModal()
+            }
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        (NSApp.delegate as? AppDelegate)?.preferencesWindow = nil
+    }
+}
 
 @main
 struct RapidPhotoDownloaderMain {
