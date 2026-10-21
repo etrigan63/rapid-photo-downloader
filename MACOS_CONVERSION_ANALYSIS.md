@@ -87,9 +87,24 @@ Scale: **102 Python modules, ~91.5 kLOC**; tests in `raphodo/tests/`; Qt `.ui`-f
 ## 5. Component-by-component conversion plan
 
 ### 5.1 UI layer (`ui/`, `rapid.py`)
-- **Option A (keep Python):** Migrate PyQt5 → PyQt6, adjust macOS-specific code paths. Fastest, but not "native" feel and packaging is awkward.
-- **Option B (native):** Rewrite in **SwiftUI + AppKit**. Large but gives native look, menus, sheets, drag-and-drop, Quick Look. Given the user's existing `mac-photo-downloader` is Swift, Option B is consistent.
-- **Recommendation:** Option B, but only after device + thumbnail vertical slices work. Keep UI shell minimal initially (single window + progress).
+
+Three realistic options:
+
+- **Option A — stay on Qt, upgrade to Qt6:** Migrate PyQt5 → PyQt6 (or PySide6, Qt's official binding). Qt6 runs on macOS/Apple Silicon, supports dark mode, Metal, and notarisation, and is the future-proof Qt path. Migration is mechanical but non-trivial: scoped enums (`Qt.AlignmentFlag.AlignCenter`), removal of `QRegExp`/`QDesktopWidget`/`QFontMetrics.width`, changed multimedia/svg modules, and palette handling. Fastest route to a working macOS build, but the result is still not a *native* macOS app (menus/sheets/file panels are Qt's, not AppKit's).
+- **Option B — native rewrite:** SwiftUI + AppKit. Largest effort but gives true native look, menus, sheets, drag-and-drop, Quick Look, and matches the user's existing `mac-photo-downloader` (Swift).
+- **Option C — hybrid:** Python/Qt6 backend logic with a thin native Swift front-end (least common; adds IPC complexity).
+
+**Recommendation:** If the goal is "runs on macOS soon", do Option A (PyQt6/PySide6) as a bridge while validating device/thumbnail slices; if the goal is "native macOS app", commit to Option B and drop Qt entirely. Do not mix Qt5 and Qt6 in the same tree. Given RPD is GPL-3.0+, PyQt6 (GPL) or PySide6 (LGPL) are both license-compatible; PySide6 is preferred for new code because it is Qt's own binding and tracks Qt releases directly.
+
+**Qt5→Qt6 migration checklist (if taking Option A):**
+- Replace `from PyQt5...` imports with `PyQt6`/`PySide6`.
+- Scope every enum (`Qt.AlignCenter` → `Qt.AlignmentFlag.AlignCenter`).
+- Replace `QRegExp` with `QRegularExpression`.
+- Replace `QDesktopWidget`/`QApplication.desktop()` with `QScreen` queries.
+- Replace `QFontMetrics.width()` with `horizontalAdvance()`.
+- Audit `QtMultimedia`/`QtSvg`/`QtPrintSupport` module paths.
+- Update `pyproject.toml` dependency (`PyQt6`/`PySide6`) and classifiers (drop `X11 Applications :: Qt`).
+- Re-test thumbnail widgets, which rely heavily on `QImage`/`QPixmap` (unchanged API, but enum scoping affects `Qt.KeepAspectRatio`, etc.).", "### 5.1 UI layer (`ui/`, `rapid.py`)"]
 
 ### 5.2 Concurrency / IPC (`interprocess.py`)
 - The multi-process design exists to bypass the Python GIL. In Swift, use **GCD / Swift concurrency (actors, TaskGroups)** within a single process, or **XPC services** for isolation. Drop ZeroMQ entirely. Thumbnail extraction becomes a `TaskGroup` of actors.
