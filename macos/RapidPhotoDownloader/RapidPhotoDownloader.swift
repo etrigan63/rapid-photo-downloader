@@ -487,7 +487,7 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
         title.font = NSFont.boldSystemFont(ofSize: 14)
         stack.addArrangedSubview(title)
 
-        func row(_ label: String, _ field: NSTextField) -> NSStackView {
+        func row(_ label: String, _ field: NSTextField, browse: Selector? = nil) -> NSStackView {
             let l = NSTextField(labelWithString: label)
             l.alignment = .right
             l.setContentHuggingPriority(.defaultHigh, for: .horizontal)
@@ -499,12 +499,16 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
             r.orientation = .horizontal
             r.spacing = 8
             field.translatesAutoresizingMaskIntoConstraints = false
-            field.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
+            field.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+            if let sel = browse {
+                let btn = NSButton(title: "Browse…", target: self, action: sel)
+                r.addArrangedSubview(btn)
+            }
             return r
         }
 
-        stack.addArrangedSubview(row("Destination root:", destField))
-        stack.addArrangedSubview(row("Backup root:", backupField))
+        stack.addArrangedSubview(row("Destination root:", destField, browse: #selector(browseDest)))
+        stack.addArrangedSubview(row("Backup root:", backupField, browse: #selector(browseBackup)))
         stack.addArrangedSubview(backupCheck)
         stack.addArrangedSubview(row("Folder pattern:", patternField))
         stack.addArrangedSubview(row("Rename template:", renameField))
@@ -557,6 +561,28 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
         c.counterDigits = Int(counterField.stringValue) ?? 4
         c.thumbnailSize = Int(thumbField.stringValue) ?? 200
         return c
+    }
+
+    @objc func browseDest() {
+        if let url = openFolderPanel(title: "Choose destination folder") {
+            destField.stringValue = url.path
+        }
+    }
+
+    @objc func browseBackup() {
+        if let url = openFolderPanel(title: "Choose backup folder") {
+            backupField.stringValue = url.path
+        }
+    }
+
+    private func openFolderPanel(title: String) -> URL? {
+        let p = NSOpenPanel()
+        p.title = title
+        p.canChooseFiles = false
+        p.canChooseDirectories = true
+        p.allowsMultipleSelection = false
+        p.canCreateDirectories = true
+        return p.runModal() == .OK ? p.url : nil
     }
 
     @objc func save() {
