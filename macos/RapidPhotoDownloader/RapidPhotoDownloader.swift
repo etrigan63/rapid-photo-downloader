@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var controller: MainController!
     var preferencesWindow: NSWindow?
+    var preferencesController: PreferencesController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMainMenu()
@@ -42,10 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openPreferences(_ sender: Any?) {
-        if preferencesWindow == nil {
+        if preferencesController == nil {
             let pc = PreferencesController()
+            preferencesController = pc
             preferencesWindow = pc.window
             pc.showWindow(nil)
+            pc.window?.makeKeyAndOrderFront(nil)
         } else {
             preferencesWindow?.makeKeyAndOrderFront(nil)
         }
@@ -455,6 +458,8 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
     func buildContent() -> NSViewController {
         let vc = NSViewController()
         let root = NSView()
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         vc.view = root
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -466,12 +471,21 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -16),
         ])
+
+        let title = NSTextField(labelWithString: "Preferences")
+        title.font = NSFont.boldSystemFont(ofSize: 14)
+        stack.addArrangedSubview(title)
 
         func row(_ label: String, _ field: NSTextField) -> NSStackView {
             let l = NSTextField(labelWithString: label)
             l.alignment = .right
             l.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+            field.bezelStyle = .roundedBezel
+            field.isBordered = true
+            field.drawsBackground = true
+            field.backgroundColor = .textBackgroundColor
             let r = NSStackView(views: [l, field])
             r.orientation = .horizontal
             r.spacing = 8
@@ -510,7 +524,9 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
     func loadFields() {
         let c = RPDConfig.load()
         destField.stringValue = c.destinationRoot
+        destField.placeholderString = "~/Pictures/Rapid"
         backupField.stringValue = c.backupRoot
+        backupField.placeholderString = "~/Pictures/Rapid Backup"
         backupCheck.state = c.backupEnabled ? .on : .off
         patternField.stringValue = c.folderPattern
         videosCheck.state = c.includeVideos ? .on : .off
@@ -577,6 +593,7 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         (NSApp.delegate as? AppDelegate)?.preferencesWindow = nil
+        (NSApp.delegate as? AppDelegate)?.preferencesController = nil
     }
 }
 
