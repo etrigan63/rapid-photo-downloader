@@ -14,6 +14,24 @@ struct RenameContext {
 
     var originalStem: String { url.deletingPathExtension().lastPathComponent }
     var ext: String { url.pathExtension }
+
+    /// Image number extracted from the original filename (digits immediately
+    /// before the extension), mirroring RPD's NUMBER_SOURCE=exif behaviour.
+    /// Falls back to the session counter when the name has no trailing digits.
+    var imageNumber: String {
+        let stem = originalStem
+        // trailing digit run
+        var i = stem.count
+        let chars = Array(stem)
+        while i > 0 && chars[i-1].isNumber { i -= 1 }
+        let digits = String(chars[i...])
+        if digits.isEmpty { return String(format: "%0\(counterDigits)d", counter) }
+        // pad to counterDigits if shorter
+        if digits.count < counterDigits {
+            return String(repeating: "0", count: counterDigits - digits.count) + digits
+        }
+        return digits
+    }
 }
 
 enum RenameEngine {
@@ -51,6 +69,7 @@ enum RenameEngine {
             ("{make}", sanitize(context.cameraMake)),
             ("{original}", sanitize(context.originalStem)),
             ("{ext}", context.ext),
+            ("{imageNumber}", context.imageNumber),
             ("{counter}", counterStr),
         ]
         for (tok, val) in tokens {

@@ -516,7 +516,7 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
         stack.addArrangedSubview(row("Counter digits:", counterField))
         stack.addArrangedSubview(row("Thumbnail size:", thumbField))
 
-        let hint = NSTextField(labelWithString: "Folder pattern: %Y %m %d. Rename tokens: {original} {ext} {date} {datetime} {camera} {make} {counter} {counter:N}")
+        let hint = NSTextField(labelWithString: "Folder pattern: %Y %m %d. Rename tokens: {original} {ext} {date} {datetime} {camera} {make} {counter} {counter:N} {imageNumber}")
         hint.font = NSFont.systemFont(ofSize: 10)
         hint.textColor = .secondaryLabelColor
         stack.addArrangedSubview(hint)
