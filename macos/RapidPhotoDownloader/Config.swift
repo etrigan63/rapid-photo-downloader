@@ -5,9 +5,12 @@ import Foundation
 /// can be saved and applied to later installations.
 struct RPDConfig: Codable, Equatable {
     var destinationRoot: String = ""
+    var videoDestinationRoot: String = "~/Movies"
     var backupRoot: String = ""
+    var videoBackupRoot: String = ""
     var backupEnabled: Bool = false
     var folderPattern: String = "%Y/%Y-%m-%d"
+    var videoFolderPattern: String = "%Y/%Y-%m-%d"
     var renameTemplate: String = "{original}"
     var includeVideos: Bool = true
     var counterDigits: Int = 4
@@ -47,9 +50,9 @@ struct RPDConfig: Codable, Equatable {
 
     // MARK: - Folder pattern formatting (RPD uses strftime-like %Y/%m/%d)
 
-    func formattedFolder(for date: Date) -> String {
-        // Convert % directives to DateFormatter tokens.
-        var fmt = folderPattern
+    func formattedFolder(for date: Date, video: Bool = false) -> String {
+        let pattern = (video && !videoFolderPattern.isEmpty) ? videoFolderPattern : folderPattern
+        var fmt = pattern
         let map: [(String, String)] = [
             ("%Y", "yyyy"), ("%y", "yy"),
             ("%m", "MM"), ("%d", "dd"),
@@ -72,8 +75,19 @@ extension RPDConfig {
         guard !destinationRoot.isEmpty else { return nil }
         return URL(fileURLWithPath: (destinationRoot as NSString).expandingTildeInPath)
     }
+    var resolvedVideoDestination: URL? {
+        let root = videoDestinationRoot.isEmpty ? destinationRoot : videoDestinationRoot
+        guard !root.isEmpty else { return nil }
+        return URL(fileURLWithPath: (root as NSString).expandingTildeInPath)
+    }
     var resolvedBackup: URL? {
         guard backupEnabled, !backupRoot.isEmpty else { return nil }
         return URL(fileURLWithPath: (backupRoot as NSString).expandingTildeInPath)
+    }
+    var resolvedVideoBackup: URL? {
+        guard backupEnabled else { return nil }
+        let root = videoBackupRoot.isEmpty ? backupRoot : videoBackupRoot
+        guard !root.isEmpty else { return nil }
+        return URL(fileURLWithPath: (root as NSString).expandingTildeInPath)
     }
 }

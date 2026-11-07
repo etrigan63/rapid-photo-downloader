@@ -279,9 +279,13 @@ final class MainController: NSViewController {
         guard let src = sourceURL else { return }
         items.removeAll()
         let fm = FileManager.default
+        let ignored: Set<String> = [".Trash", ".thumbnails", "THMBNL", "__MACOSX", "Screenshots", "BDMV"]
         if let en = fm.enumerator(at: src, includingPropertiesForKeys: [.isRegularFileKey],
                                   options: [.skipsHiddenFiles]) {
             for case let u as URL in en {
+                // skip ignored path components
+                let components = Set(u.pathComponents)
+                if !components.isDisjoint(with: ignored) { continue }
                 if isMediaFile(u) {
                     items.append(MediaItem(url: u, captureDate: HEIFThumbnail.captureDate(url: u)))
                 }
@@ -309,8 +313,11 @@ final class MainController: NSViewController {
             let total = Double(workItems.count)
             for i in updated.indices {
                 let item = updated[i]
-                let relative = config.formattedFolder(for: item.captureDate)
-                let targetDir = relative.split(separator: "/").reduce(dest) { $0.appendingPathComponent(String($1)) }
+                let isVideo = videoExts.contains(item.url.pathExtension.lowercased())
+                let destForItem = isVideo ? (config.resolvedVideoDestination ?? dest) : dest
+                let backupForItem = isVideo ? (config.resolvedVideoBackup ?? config.resolvedBackup) : config.resolvedBackup
+                let relative = config.formattedFolder(for: item.captureDate, video: isVideo)
+                let targetDir = relative.split(separator: "/").reduce(destForItem) { $0.appendingPathComponent(String($1)) }
                 do {
                     try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
                     let (make, model) = RenameEngine.cameraInfo(url: item.url)
@@ -330,7 +337,7 @@ final class MainController: NSViewController {
                         self?.log("Copied: \(item.url.lastPathComponent) → \(relative)/\(finalName)")
                     }
                     // Backup copy
-                    if let backupRoot = config.resolvedBackup {
+                    if let backupRoot = backupForItem {
                         let backupDir = relative.split(separator: "/").reduce(backupRoot) { $0.appendingPathComponent(String($1)) }
                         try? fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
                         let backupTarget = backupDir.appendingPathComponent(finalName)
@@ -443,9 +450,12 @@ final class ThumbItem: NSCollectionViewItem {
 
 final class PreferencesController: NSWindowController, NSWindowDelegate {
     let destField = NSTextField()
+    let videoDestField = NSTextField()
     let backupField = NSTextField()
+    let videoBackupField = NSTextField()
     let backupCheck = NSButton(checkboxWithTitle: "Enable backup copy", target: nil, action: nil)
     let patternField = NSTextField()
+    let videoPatternField = NSTextField()
     let renameField = NSTextField()
     let videosCheck = NSButton(checkboxWithTitle: "Include videos", target: nil, action: nil)
     let counterField = NSTextField()
@@ -508,9 +518,12 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
         }
 
         stack.addArrangedSubview(row("Destination root:", destField, browse: #selector(browseDest)))
+        stack.addArrangedSubview(row("Video destination:", videoDestField, browse: #selector(browseVideoDest)))
         stack.addArrangedSubview(row("Backup root:", backupField, browse: #selector(browseBackup)))
+        stack.addArrangedSubview(row("Video backup:", videoBackupField, browse: #selector(browseVideoBackup)))
         stack.addArrangedSubview(backupCheck)
         stack.addArrangedSubview(row("Folder pattern:", patternField))
+        stack.addArrangedSubview(row("Video folder pattern:", videoPatternField))
         stack.addArrangedSubview(row("Rename template:", renameField))
         stack.addArrangedSubview(videosCheck)
         stack.addArrangedSubview(row("Counter digits:", counterField))
@@ -539,10 +552,15 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
         let c = RPDConfig.load()
         destField.stringValue = c.destinationRoot
         destField.placeholderString = "~/Pictures/Rapid"
+        videoDestField.stringValue = c.videoDestinationRoot
+        videoDestField.placeholderString = "~/Movies/Rapid"
         backupField.stringValue = c.backupRoot
         backupField.placeholderString = "~/Pictures/Rapid Backup"
+        videoBackupField.stringValue = c.videoBackupRoot
+        videoBackupField.placeholderString = "~/Movies/Rapid Backup"
         backupCheck.state = c.backupEnabled ? .on : .off
         patternField.stringValue = c.folderPattern
+        videoPatternField.stringValue = c.videoFolderPattern
         renameField.stringValue = c.renameTemplate
         renameField.placeholderString = "{original}"
         videosCheck.state = c.includeVideos ? .on : .off
@@ -553,9 +571,12 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
     func collectConfig() -> RPDConfig {
         var c = RPDConfig()
         c.destinationRoot = destField.stringValue
+        c.videoDestinationRoot = videoDestField.stringValue
         c.backupRoot = backupField.stringValue
+        c.videoBackupRoot = videoBackupField.stringValue
         c.backupEnabled = (backupCheck.state == .on)
         c.folderPattern = patternField.stringValue.isEmpty ? "%Y/%Y-%m-%d" : patternField.stringValue
+        c.videoFolderPattern = videoPatternField.stringValue.isEmpty ? c.folderPattern : videoPatternField.stringValue
         c.renameTemplate = renameField.stringValue.isEmpty ? "{original}" : renameField.stringValue
         c.includeVideos = (videosCheck.state == .on)
         c.counterDigits = Int(counterField.stringValue) ?? 4
@@ -572,6 +593,18 @@ final class PreferencesController: NSWindowController, NSWindowDelegate {
     @objc func browseBackup() {
         if let url = openFolderPanel(title: "Choose backup folder") {
             backupField.stringValue = url.path
+        }
+    }
+
+    @objc func browseVideoDest() {
+        if let url = openFolderPanel(title: "Choose video destination folder") {
+            videoDestField.stringValue = url.path
+        }
+    }
+
+    @objc func browseVideoBackup() {
+        if let url = openFolderPanel(title: "Choose video backup folder") {
+            videoBackupField.stringValue = url.path
         }
     }
 

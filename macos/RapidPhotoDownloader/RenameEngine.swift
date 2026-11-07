@@ -35,8 +35,43 @@ struct RenameContext {
 }
 
 enum RenameEngine {
-    /// Read camera make/model from image metadata (TIFF/EXIF), if present.
+    /// Read camera make/model from image metadata or video sidecar/exiftool.
     static func cameraInfo(url: URL) -> (make: String, model: String) {
+        let ext = url.pathExtension.lowercased()
+        let videoExts: Set<String> = ["mp4","mov","m4v","avi","mts","m2ts","3gp","mod"]
+        if videoExts.contains(ext) {
+            // 1. Sony sidecar XML: C0028.MP4 -> C0028M01.XML
+            let sidecar = url.deletingPathExtension().appendingPathExtension("M01.XML")
+            // Actually Sony naming: C0028M01.XML
+            let altSidecar = url.deletingLastPathComponent()
+                .appendingPathComponent(url.deletingPathExtension().lastPathComponent + "M01.XML")
+            for sc in [sidecar, altSidecar] {
+                if let data = try? Data(contentsOf: sc),
+                   let xml = String(data: data, encoding: .utf8) {
+                    if let range = xml.range(of: "modelName=\"") {
+                        let after = xml[range.upperBound...]
+                        if let end = after.firstIndex(of: "\"") {
+                            let model = String(after[..<end])
+                            // manufacturer
+                            var make = ""
+                            if let mr = xml.range(of: "manufacturer=\"") {
+                                let a = xml[mr.upperBound...]
+                                if let e = a.firstIndex(of: "\"") { make = String(a[..<e]) }
+                            }
+                            if !model.isEmpty { return (make, model) }
+                        }
+                    }
+                }
+            }
+            // 2. exiftool fallback
+            if let exif = runExiftool(url: url) {
+                let model = exif["DeviceModelName"] ?? exif["CameraModelName"] ?? exif["Model"] ?? ""
+                let make = exif["Make"] ?? exif["Manufacturer"] ?? ""
+                if !model.isEmpty { return (make, model) }
+            }
+            return ("", "UNKNOWN")
+        }
+        // Images: ImageIO
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else {
             return ("", "")
@@ -46,6 +81,42 @@ enum RenameEngine {
         let model = (tiff?[kCGImagePropertyTIFFModel] as? String) ?? ""
         return (make.trimmingCharacters(in: .whitespaces),
                 model.trimmingCharacters(in: .whitespaces))
+    }
+
+    private static func runExiftool(url: URL) -> [String: String]? {
+        let exiftoolPath = ["/opt/homebrew/bin/exiftool", "/usr/local/bin/exiftool", "exiftool"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) || $0 == "exiftool" } ?? "exiftool"
+        guard let exe = (exiftoolPath == "exiftool" ? (shellWhich("exiftool") ?? nil) : exiftoolPath) as String? else { return nil }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: exe)
+        proc.arguments = ["-s", "-s", "-s", "-j", "-DeviceModelName", "-CameraModelName", "-Model", "-Make", "-Manufacturer", url.path]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        do { try proc.run() } catch { return nil }
+        proc.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let dict = arr.first else { return nil }
+        var out: [String: String] = [:]
+        for (k,v) in dict {
+            if let s = v as? String { out[k] = s }
+        }
+        return out
+    }
+
+    private static func shellWhich(_ cmd: String) -> String? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        p.arguments = [cmd]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = Pipe()
+        do { try p.run() } catch { return nil }
+        p.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return path.isEmpty ? nil : path
     }
 
     /// Apply a template to produce a new filename (without directory).
